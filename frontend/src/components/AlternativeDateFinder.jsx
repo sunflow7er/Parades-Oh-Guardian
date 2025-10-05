@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Calendar, Clock, MapPin, CheckCircle, AlertTriangle, Sun } from 'lucide-react';
 
 // Real-data powered Alternative Date Finder (Date Crafter)
@@ -7,6 +7,9 @@ import { Calendar, Clock, MapPin, CheckCircle, AlertTriangle, Sun } from 'lucide
 const AlternativeDateFinder = ({ location, originalDates, weatherData, activityType }) => {
   const [alternativeDates, setAlternativeDates] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const computeAbortRef = useRef(false);
+  const [progress, setProgress] = useState({ processed: 0, total: 0 });
   const [searchRange, setSearchRange] = useState(14); // forward days to consider (if present in dailyAnalysis)
   const [selectedActivity, setSelectedActivity] = useState(activityType || 'general');
   const [isVisible, setIsVisible] = useState(false);
@@ -114,50 +117,126 @@ const AlternativeDateFinder = ({ location, originalDates, weatherData, activityT
   // Extract real daily analysis (NASA normalized structure) once
   const dailyAnalysis = useMemo(() => weatherData?.dailyAnalysis || weatherData?.daily_analysis || [], [weatherData]);
 
+  // Memoize transformed weather objects to avoid re-mapping each render
+  const mappedDaily = useMemo(() => {
+    return dailyAnalysis
+      .map(d => {
+        if (!d) return null;
+        const dateStr = d.date;
+        const conditions = d.conditions || {};
+        // Pre-compute primitive fields once
+        const temperature = conditions.temperature ?? d.temperature_avg ?? d.temperature;
+        const precipitation = conditions.precipitation ?? d.precipitation ?? 0;
+        const rawWind = conditions.wind_speed ?? d.wind_speed ?? d.windSpeed ?? 0;
+        // If original had wind_speed assume m/s -> convert to km/h else leave
+        const windSpeed = (d.wind_speed || conditions.wind_speed) ? rawWind * 3.6 : rawWind;
+        const humidity = conditions.humidity ?? d.humidity ?? 0;
+        const dateObj = new Date(dateStr);
+        if (isNaN(dateObj)) return null;
+        return {
+          date: dateStr,
+            dateObj,
+          temperature,
+          precipitation,
+          windSpeed,
+          humidity,
+          cloudCover: conditions.cloud_cover ?? d.cloudCover ?? 0,
+          uvIndex: conditions.uv_index ?? d.uvIndex ?? 0
+        };
+      })
+      .filter(Boolean);
+  }, [dailyAnalysis]);
+
   // Transform a NASA daily record to simplified weather metrics
-  const mapDailyToWeather = (d) => {
-    if (!d) return null;
-    const dateObj = new Date(d.date);
-    return {
-      date: d.date,
-      temperature: d.conditions?.temperature ?? d.temperature_avg ?? d.temperature,
-      precipitation: d.conditions?.precipitation ?? d.precipitation ?? 0,
-      windSpeed: (d.conditions?.wind_speed ?? d.wind_speed ?? d.windSpeed ?? 0) * (d.wind_speed ? 3.6 : 1), // if original in m/s convert to km/h
-      humidity: d.conditions?.humidity ?? d.humidity ?? 0,
-      cloudCover: d.conditions?.cloud_cover ?? d.cloudCover ?? 0,
-      uvIndex: d.conditions?.uv_index ?? d.uvIndex ?? 0,
-      _dateObj: dateObj
-    };
-  };
+  // mapDailyToWeather now redundant - use mappedDaily instead
 
   // Build candidates from real data within searchRange (future oriented if possible)
-  const buildRealAlternatives = () => {
-    if (!dailyAnalysis.length) return [];
-    const requirements = activityRequirements[selectedActivity];
-    const today = new Date();
-    const endSearch = new Date();
-    endSearch.setDate(today.getDate() + searchRange);
+  const buildCandidatePool = () => {
+    if (!mappedDaily.length) return [];
+    const requirements = activityRequirements[selectedActivity] || activityRequirements['general'];
+    const now = Date.now();
+    const horizonMs = searchRange * 24 * 3600 * 1000;
+    const endMs = now + horizonMs;
+    let candidates = mappedDaily.filter(w => w.dateObj.getTime() >= now && w.dateObj.getTime() <= endMs);
+    if (!candidates.length) candidates = mappedDaily;
 
-    const candidates = dailyAnalysis
-      .map(mapDailyToWeather)
-      .filter(w => w && w._dateObj >= today && w._dateObj <= endSearch);
-
-    // Fallback: if no forward-looking dates (user selected all past?), then use entire set
-    const dataset = candidates.length ? candidates : dailyAnalysis.map(mapDailyToWeather).filter(Boolean);
-
-    const scored = dataset.map(w => {
-      const s = calculateSafetyScore(w, requirements);
-      return {
-        date: new Date(w.date),
-        weather: w,
-        safetyScore: s.score,
-        safetyFactors: s.factors,
-        dayOfWeek: new Date(w.date).toLocaleDateString('en-US', { weekday: 'long' }),
-        recommendation: s.score >= 80 ? 'excellent' : s.score >= 60 ? 'good' : s.score >= 40 ? 'fair' : 'poor'
-      };
+    // Prefilter: drop days far outside temperature band (>15°C below min or >10°C above max) to save scoring time
+    candidates = candidates.filter(w => {
+      const req = requirements.temperature;
+      if (typeof w.temperature !== 'number') return false;
+      if (w.temperature < req.min - 15) return false;
+      if (w.temperature > req.max + 10) return false;
+      return true;
     });
 
-    return scored.sort((a,b)=> b.safetyScore - a.safetyScore);
+    // Hard cap to avoid huge loops (post filter). Keep earliest slice.
+    if (candidates.length > 150) candidates = candidates.slice(0, 150);
+    return candidates;
+  };
+
+  const incrementalScore = (candidates, onDone) => {
+    const requirements = activityRequirements[selectedActivity] || activityRequirements['general'];
+    const topK = 40;
+    const scored = [];
+    let index = 0;
+    let dynamicChunk = 10; // starting chunk size
+    let lastChunkTime = 0;
+    let lastFrameTs = performance.now();
+    setProgress({ processed: 0, total: candidates.length });
+
+    const flushPartial = () => {
+      // Provide partial progressive results (sorted copy) without blocking scoring
+      const partial = [...scored].sort((a,b)=> b.safetyScore - a.safetyScore);
+      setAlternativeDates(partial);
+    };
+
+    const processChunk = () => {
+      if (computeAbortRef.current) return;
+      const startTs = performance.now();
+      const end = Math.min(index + dynamicChunk, candidates.length);
+      for (; index < end; index++) {
+        const w = candidates[index];
+        const s = calculateSafetyScore(w, requirements);
+        const entry = {
+          date: w.dateObj,
+          weather: w,
+          safetyScore: s.score,
+          safetyFactors: s.factors,
+          dayOfWeek: w.dateObj.toLocaleDateString('en-US', { weekday: 'long' }),
+          recommendation: s.score >= 80 ? 'excellent' : s.score >= 60 ? 'good' : s.score >= 40 ? 'fair' : 'poor'
+        };
+        scored.push(entry);
+        if (scored.length > topK) {
+          let worstIdx = 0;
+          for (let i=1;i<scored.length;i++) if (scored[i].safetyScore < scored[worstIdx].safetyScore) worstIdx = i;
+          scored.splice(worstIdx,1);
+        }
+      }
+      const chunkDuration = performance.now() - startTs;
+      lastChunkTime = chunkDuration;
+      // Adapt chunk size: aim for ~8-14ms per chunk
+      if (chunkDuration < 6 && dynamicChunk < 60) dynamicChunk += 4;
+      else if (chunkDuration > 18 && dynamicChunk > 6) dynamicChunk = Math.max(6, Math.floor(dynamicChunk * 0.7));
+
+      setProgress({ processed: index, total: candidates.length });
+
+      // Flush partial every ~40ms or on first chunk
+      const nowTs = performance.now();
+      if (nowTs - lastFrameTs > 40 || index === end) {
+        flushPartial();
+        lastFrameTs = nowTs;
+      }
+
+      if (index < candidates.length && !computeAbortRef.current) {
+        requestAnimationFrame(processChunk);
+      } else {
+        // Final sort and completion
+        scored.sort((a,b)=> b.safetyScore - a.safetyScore);
+        flushPartial();
+        onDone(scored);
+      }
+    };
+    requestAnimationFrame(processChunk);
   };
 
   // Merge backend-provided alternativeDates (if any) for consistency
@@ -168,8 +247,8 @@ const AlternativeDateFinder = ({ location, originalDates, weatherData, activityT
     const mapped = backendAlt.map(d => {
       const dateStr = d.date || d;
       const dateObj = new Date(dateStr);
-      const weatherFromDaily = dailyAnalysis.find(x => x.date === dateStr);
-      const mappedWeather = mapDailyToWeather(weatherFromDaily) || {
+      const weatherFromDaily = mappedDaily.find(x => x.date === dateStr);
+      const mappedWeather = weatherFromDaily || {
         date: dateStr,
         temperature: d.temperature,
         precipitation: d.precipitation,
@@ -177,7 +256,7 @@ const AlternativeDateFinder = ({ location, originalDates, weatherData, activityT
         humidity: d.humidity || 60,
         cloudCover: d.cloudCover || 0,
         uvIndex: d.uvIndex || 0,
-        _dateObj: dateObj
+        dateObj
       };
       const requirements = activityRequirements[selectedActivity];
       const s = calculateSafetyScore(mappedWeather, requirements);
@@ -197,14 +276,32 @@ const AlternativeDateFinder = ({ location, originalDates, weatherData, activityT
   useEffect(() => {
     setIsVisible(true);
     setLoading(true);
-    const timer = setTimeout(() => {
-      let generated = buildRealAlternatives();
-      generated = mergeBackendAlternatives(generated);
-      setAlternativeDates(generated);
+    setTimedOut(false);
+    computeAbortRef.current = false;
+
+    const start = performance.now();
+    const timeoutId = setTimeout(() => {
+      setTimedOut(true);
+      computeAbortRef.current = true;
+    }, 2500); // slight bump to allow chunked flow
+
+    const candidates = buildCandidatePool();
+    incrementalScore(candidates, (scoredFinal) => {
+      if (!computeAbortRef.current) {
+        const merged = mergeBackendAlternatives(scoredFinal);
+        setAlternativeDates(merged);
+      }
+      clearTimeout(timeoutId);
       setLoading(false);
-    }, 300); // short UX delay
-    return () => clearTimeout(timer);
-  }, [selectedActivity, searchRange, location, dailyAnalysis]);
+      const elapsed = performance.now() - start;
+      console.debug('AlternativeDateFinder incremental total (ms):', Math.round(elapsed));
+    });
+
+    return () => {
+      computeAbortRef.current = true;
+      clearTimeout(timeoutId);
+    };
+  }, [selectedActivity, searchRange, location, mappedDaily]);
 
   const getRecommendationColor = (recommendation) => {
     switch (recommendation) {
@@ -233,6 +330,12 @@ const AlternativeDateFinder = ({ location, originalDates, weatherData, activityT
           <div className="text-center">
             <div className="animate-spin w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full mx-auto mb-4"></div>
             <p className="text-gray-600">Analyzing {searchRange} days of weather forecasts...</p>
+            {progress.total > 0 && (
+              <p className="text-xs text-gray-500 mt-1">Processed {progress.processed}/{progress.total} candidates…</p>
+            )}
+            {timedOut && (
+              <p className="text-xs text-red-500 mt-2">Still processing… large range or slow device. Partial results will appear soon.</p>
+            )}
             <p className="text-sm text-gray-500 mt-2">Finding optimal dates for {(activityRequirements[selectedActivity]||activityRequirements['general']).name}</p>
           </div>
         </div>

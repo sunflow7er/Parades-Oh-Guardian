@@ -1,6 +1,75 @@
+@import './styles/enhanced-animations.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Minecraft-inspired theming */
+.minecraft-header {
+  background-image: linear-gradient(45deg, #10b981 25%, transparent 25%, transparent 50%, #10b981 50%, #10b981 75%, transparent 75%, transparent),
+                    linear-gradient(45deg, #34d399 25%, transparent 25%, transparent 50%, #34d399 50%, #34d399 75%, transparent 75%, transparent);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
+
+.minecraft-footer {
+  background-image: linear-gradient(45deg, #064e3b 25%, transparent 25%, transparent 50%, #064e3b 50%, #064e3b 75%, transparent 75%, transparent),
+                    linear-gradient(45deg, #047857 25%, transparent 25%, transparent 50%, #047857 50%, #047857 75%, transparent 75%, transparent);
+  background-size: 6px 6px;
+  background-position: 0 0, 3px 3px;
+}
+
+.minecraft-modal {
+  background-image: linear-gradient(45deg, #f0fdf4 25%, transparent 25%, transparent 50%, #f0fdf4 50%, #f0fdf4 75%, transparent 75%, transparent),
+                    linear-gradient(45deg, #dcfce7 25%, transparent 25%, transparent 50%, #dcfce7 50%, #dcfce7 75%, transparent 75%, transparent);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
+}
+
+.minecraft-content {
+  background-image: linear-gradient(45deg, #f7fee7 25%, transparent 25%, transparent 50%, #f7fee7 50%, #f7fee7 75%, transparent 75%, transparent),
+                    linear-gradient(45deg, #ecfccb 25%, transparent 25%, transparent 50%, #ecfccb 50%, #ecfccb 75%, transparent 75%, transparent);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.text-shadow-lg {
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Scrollbar styling for minecraft theme */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Button hover animations */
+@keyframes minecraft-bounce {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-2px); }
+}
+
+.minecraft-button:hover {
+  animation: minecraft-bounce 0.6s ease-in-out infinite;
+}
+
+/* Additional base styles */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure the app renders */
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
 
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;

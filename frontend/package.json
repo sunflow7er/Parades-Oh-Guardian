@@ -1,6 +1,6 @@
 {
-  "name": "parade-saver-frontend",
-  "description": "NASA Space Apps Challenge 2025 - Weather Window Finder frontend",
+  "name": "parades-oh-guardian-frontend",
+  "description": "NASA Space Apps Challenge 2025 - Parade's oh guardian Weather Window Finder frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.1.14",
     "autoprefixer": "^10.4.21",
     "axios": "^1.12.2",
     "leaflet": "^1.9.4",
@@ -20,7 +21,7 @@
     "react-dom": "^19.1.1",
     "react-leaflet": "^5.0.0",
     "recharts": "^3.2.1",
-    "tailwindcss": "^4.1.14"
+    "tailwindcss": "^3.4.18"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

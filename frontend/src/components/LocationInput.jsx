@@ -1,9 +1,13 @@
-import { useState } from 'react'
-import { MapPin, Search } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { MapPin, Search, X } from 'lucide-react'
 
-const LocationInput = ({ value, onChange }) => {
-  const [searchQuery, setSearchQuery] = useState('')
-  
+const LocationInput = ({ onLocationSelect, selectedLocation }) => {
+  const [query, setQuery] = useState('')
+  const [suggestions, setSuggestions] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const dropdownRef = useRef(null)
+
   const kazakhstanCities = [
     { name: 'Almaty', lat: 43.2567, lng: 76.9286 },
     { name: 'Nur-Sultan (Astana)', lat: 51.1694, lng: 71.4491 },
@@ -14,93 +18,128 @@ const LocationInput = ({ value, onChange }) => {
     { name: 'Ust-Kamenogorsk', lat: 49.9487, lng: 82.6159 },
     { name: 'Semey', lat: 50.4119, lng: 80.2275 }
   ]
-  
-  const handleCitySelect = (city) => {
-    onChange({
-      latitude: city.lat,
-      longitude: city.lng
-    })
-    setSearchQuery(city.name)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowDropdown(false)
+        setSuggestions([])
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleSearch = (value) => {
+    setLoading(true)
+    setTimeout(() => {
+      const filtered = kazakhstanCities.filter(city =>
+        city.name.toLowerCase().includes(value.toLowerCase())
+      )
+      setSuggestions(filtered)
+      setLoading(false)
+    }, 300)
   }
-  
-  const handleCoordinateChange = (field, val) => {
-    onChange({
-      ...value,
-      [field]: parseFloat(val) || 0
-    })
+
+  const handleLocationSelect = (location) => {
+    onLocationSelect(location)
+    setQuery(location.name)
+    setShowDropdown(false)
+    setSuggestions([])
   }
-  
-  const filteredCities = kazakhstanCities.filter(city =>
-    city.name.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-  
+
+  const clearSelection = () => {
+    onLocationSelect(null)
+    setQuery('')
+    setShowDropdown(false)
+    setSuggestions([])
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={dropdownRef}>
       <label className="block text-sm font-medium text-gray-700 mb-2">
         <MapPin className="w-4 h-4 inline mr-1" />
         Location
       </label>
       
-      {/* City Search */}
+      {/* Enhanced Search Input */}
       <div className="relative">
-        <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
         <input
           type="text"
-          placeholder="Search Kazakhstan cities..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setShowDropdown(e.target.value.length > 0)
+            handleSearch(e.target.value)
+          }}
+          onFocus={() => setShowDropdown(query.length > 0)}
+          placeholder="Search city or enter coordinates..."
+          className="w-full pl-10 pr-10 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-white"
         />
         
-        {searchQuery && filteredCities.length > 0 && (
-          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-            {filteredCities.map((city) => (
-              <button
-                key={city.name}
-                onClick={() => handleCitySelect(city)}
-                className="w-full text-left px-4 py-2 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none first:rounded-t-lg last:rounded-b-lg"
-              >
-                <div className="font-medium">{city.name}</div>
-                <div className="text-sm text-gray-500">
-                  {city.lat.toFixed(4)}, {city.lng.toFixed(4)}
-                </div>
-              </button>
-            ))}
+        {/* Clear button */}
+        {query && (
+          <button
+            onClick={clearSelection}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+        
+        {loading && (
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+            <div className="animate-spin h-5 w-5 border-2 border-blue-500 rounded-full border-t-transparent"></div>
           </div>
         )}
       </div>
-      
-      {/* Manual Coordinates */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Latitude</label>
-          <input
-            type="number"
-            step="0.0001"
-            value={value.latitude || ''}
-            onChange={(e) => handleCoordinateChange('latitude', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            placeholder="43.2567"
-          />
+
+      {/* Fixed Suggestions Dropdown */}
+      {showDropdown && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full bg-white border-2 border-gray-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
+          {suggestions.map((location, index) => (
+            <button
+              key={index}
+              onClick={() => handleLocationSelect(location)}
+              className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors flex items-center gap-3 border-b border-gray-100 last:border-b-0"
+            >
+              <MapPin className="w-4 h-4 text-blue-600 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{location.name}</p>
+                <p className="text-xs text-gray-500 truncate">
+                  {location.lat.toFixed(4)}°N, {location.lng.toFixed(4)}°E
+                </p>
+              </div>
+            </button>
+          ))}
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Longitude</label>
-          <input
-            type="number"
-            step="0.0001"
-            value={value.longitude || ''}
-            onChange={(e) => handleCoordinateChange('longitude', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            placeholder="76.9286"
-          />
-        </div>
-      </div>
-      
-      {/* Current Selection Display */}
-      {value.latitude && value.longitude && (
-        <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
-          <MapPin className="w-4 h-4 inline mr-1" />
-          Selected: {value.latitude.toFixed(4)}, {value.longitude.toFixed(4)}
+      )}
+
+      {/* Selected Location Display */}
+      {selectedLocation && (
+        <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl animate-slide-up">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                <MapPin className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-green-800">{selectedLocation.name}</p>
+                <p className="text-sm text-green-600">
+                  📍 {selectedLocation.lat.toFixed(4)}°N, {selectedLocation.lng.toFixed(4)}°E
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={clearSelection}
+              className="text-green-600 hover:text-green-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       )}
     </div>

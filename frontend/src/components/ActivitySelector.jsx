@@ -1,7 +1,7 @@
 import { Activity, Heart, Mountain, Wheat } from 'lucide-react'
+import { useState } from 'react';
 
-const ActivitySelector = ({ value, onChange }) => {
-  
+const ActivitySelector = ({ onActivitySelect, selectedActivity }) => {
   const activities = [
     {
       id: 'wedding',
@@ -68,35 +68,42 @@ const ActivitySelector = ({ value, onChange }) => {
   
   return (
     <div className="space-y-4">
-      <label className="block text-sm font-medium text-gray-700 mb-2">
-        <Activity className="w-4 h-4 inline mr-1" />
-        Activity Type
+      <label className="block text-sm font-semibold text-gray-700 mb-2">
+        🎯 Activity Type
       </label>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         {activities.map((activity) => {
           const IconComponent = activity.icon
-          const isSelected = value === activity.id
+          const isSelected = selectedActivity?.id === activity.id
           
           return (
             <button
               key={activity.id}
-              onClick={() => onChange(activity.id)}
-              className={`p-4 border rounded-xl text-left transition-all duration-200 ${getColorClasses(activity.color, isSelected)}`}
+              onClick={() => onActivitySelect(activity)}
+              className={`
+                p-4 rounded-xl border-2 transition-all duration-200 text-left
+                ${isSelected
+                  ? 'border-blue-500 bg-blue-50 shadow-lg transform scale-105'
+                  : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50'
+                }
+                hover:shadow-md
+              `}
             >
-              <div className="flex items-start space-x-3">
-                <div className={`p-2 rounded-lg ${activity.color === 'pink' ? 'bg-pink-100' : activity.color === 'green' ? 'bg-green-100' : activity.color === 'yellow' ? 'bg-yellow-100' : 'bg-blue-100'}`}>
-                  <IconComponent className={`w-5 h-5 ${getIconClasses(activity.color)}`} />
-                </div>
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">{activity.icon}</span>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-gray-800">{activity.name}</h3>
-                  <p className="text-sm text-gray-600 mt-1">{activity.description}</p>
+                  <p className={`font-semibold ${
+                    isSelected ? 'text-blue-800' : 'text-gray-800'
+                  }`}>
+                    {activity.name}
+                  </p>
+                  <p className={`text-xs mt-1 ${
+                    isSelected ? 'text-blue-600' : 'text-gray-500'
+                  }`}>
+                    {activity.description}
+                  </p>
                 </div>
-                {isSelected && (
-                  <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full"></div>
-                  </div>
-                )}
               </div>
             </button>
           )
@@ -104,10 +111,10 @@ const ActivitySelector = ({ value, onChange }) => {
       </div>
       
       {/* Activity-Specific Thresholds Info */}
-      {value && (
+      {selectedActivity && (
         <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-          <h4 className="font-medium text-gray-800 mb-2">Weather Criteria for {activities.find(a => a.id === value)?.name}</h4>
-          <ActivityThresholds activityType={value} />
+          <h4 className="font-medium text-gray-800 mb-2">Weather Criteria for {activities.find(a => a.id === selectedActivity.id)?.name}</h4>
+          <ActivityThresholds activityType={selectedActivity.id} />
         </div>
       )}
     </div>

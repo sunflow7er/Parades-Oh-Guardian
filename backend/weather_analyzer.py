@@ -1,350 +1,550 @@
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
+"""
+Weather Analyzer - Statistical Analysis Module  
+Traditional weather pattern analysis for outdoor event planning
+"""
+
 import statistics
+import math
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 class WeatherAnalyzer:
     """
-    Advanced weather analysis and prediction engine
+    Traditional weather analyzer with statistical methods
     """
     
     def __init__(self):
-        self.activity_thresholds = {
+        self.historical_weight = 0.7
+        self.recent_weight = 0.3
+        self.confidence_threshold = 50
+        
+        # Weather risk thresholds
+        self.risk_thresholds = {
+            'temperature': {'very_hot': 35, 'very_cold': -15},
+            'precipitation': {'heavy_rain': 25, 'moderate_rain': 10},
+            'wind': {'strong_wind': 50, 'moderate_wind': 25},
+            'humidity': {'very_humid': 85, 'very_dry': 20}
+        }
+        
+        # Activity-specific comfort ranges
+        self.comfort_ranges = {
             'wedding': {
-                'max_rain': 5,        # mm/day
-                'ideal_temp_min': 18,  # °C
-                'ideal_temp_max': 28,  # °C
-                'max_wind': 25,        # km/h (7 m/s)
-                'max_humidity': 70     # %
+                'temp_min': 18, 'temp_max': 28, 'max_rain': 5, 'max_wind': 25
             },
             'hiking': {
-                'max_rain': 10,
-                'ideal_temp_min': 10,
-                'ideal_temp_max': 25,
-                'max_wind': 40,
-                'max_humidity': 80
+                'temp_min': 10, 'temp_max': 25, 'max_rain': 15, 'max_wind': 40
             },
             'farming': {
-                'max_rain': 50,
-                'ideal_temp_min': 5,
-                'ideal_temp_max': 35,
-                'max_wind': 60,
-                'max_humidity': 90
+                'temp_min': 0, 'temp_max': 35, 'max_rain': 40, 'max_wind': 60
             },
             'general': {
-                'max_rain': 15,
-                'ideal_temp_min': 15,
-                'ideal_temp_max': 30,
-                'max_wind': 35,
-                'max_humidity': 75
+                'temp_min': 15, 'temp_max': 30, 'max_rain': 12, 'max_wind': 35
             }
         }
-    
-    def find_best_weather_windows(self, nasa_data: Dict, activity_type: str, 
-                                start_date: str, end_date: str) -> Dict:
+
+    def analyze_weather_patterns(self, historical_data: List[Dict], 
+                               target_dates: List[str], 
+                               activity_type: str = 'general') -> Dict:
         """
-        Find the best weather windows for the given activity and date range
-        
-        Args:
-            nasa_data: Processed NASA weather data
-            activity_type: Type of activity (wedding, hiking, farming, general)
-            start_date: Target start date (YYYY-MM-DD)
-            end_date: Target end date (YYYY-MM-DD)
-            
-        Returns:
-            Analysis results with ranked weather windows
+        Analyze weather patterns for given target dates
         """
         
         try:
-            # Convert daily data to DataFrame
-            df = pd.DataFrame(nasa_data['daily_data'])
+            if not historical_data:
+                return self._generate_fallback_analysis(target_dates, activity_type)
             
-            # Get activity-specific thresholds
-            thresholds = self.activity_thresholds.get(activity_type, self.activity_thresholds['general'])
+            # Process historical data
+            processed_data = self._process_historical_data(historical_data)
             
-            # Generate target date range
-            target_dates = pd.date_range(start=start_date, end=end_date, freq='D')
+            # Calculate baseline statistics
+            baseline_stats = self._calculate_baseline_statistics(processed_data)
             
-            # Analyze each target date
-            weather_windows = []
+            # Analyze seasonal patterns
+            seasonal_patterns = self._analyze_seasonal_patterns(processed_data)
             
-            for target_date in target_dates:
-                analysis = self._analyze_single_date(df, target_date, thresholds, nasa_data['metadata'])
-                if analysis:
-                    weather_windows.append(analysis)
+            # Generate predictions for each target date
+            predictions = []
+            for date_str in target_dates:
+                target_date = datetime.strptime(date_str, '%Y-%m-%d')
+                prediction = self._predict_weather_for_date(
+                    target_date, processed_data, baseline_stats, 
+                    seasonal_patterns, activity_type
+                )
+                predictions.append(prediction)
             
-            # Sort by weather score (best first)
-            weather_windows.sort(key=lambda x: x['weather_score'], reverse=True)
-            
-            # Get top 5 recommendations
-            top_windows = weather_windows[:5]
-            
-            # Calculate overall insights
-            insights = self._generate_insights(weather_windows, df, thresholds)
+            # Sort predictions by suitability score
+            predictions.sort(key=lambda x: x.get('suitability_score', 0), reverse=True)
             
             return {
                 'success': True,
-                'activity_type': activity_type,
-                'analysis_period': {
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'total_days_analyzed': len(weather_windows)
-                },
-                'top_recommendations': top_windows,
-                'all_windows': weather_windows,
-                'insights': insights,
-                'methodology': {
-                    'data_source': 'NASA POWER API (20-year historical)',
-                    'analysis_method': 'Statistical probability + ML pattern recognition',
-                    'confidence_calculation': 'Based on historical data reliability'
+                'analysis_method': 'Statistical Weather Pattern Analysis',
+                'baseline_statistics': baseline_stats,
+                'seasonal_patterns': seasonal_patterns,
+                'predictions': predictions,
+                'top_recommendations': predictions[:3],
+                'activity_analysis': self._analyze_activity_suitability(predictions, activity_type),
+                'data_quality': {
+                    'records_analyzed': len(processed_data),
+                    'date_range': self._get_data_date_range(processed_data),
+                    'completeness': self._assess_data_completeness(processed_data)
                 }
             }
             
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e)
+                'error': f'Weather pattern analysis failed: {str(e)}',
+                'fallback_analysis': self._generate_fallback_analysis(target_dates, activity_type)
             }
-    
-    def _analyze_single_date(self, df: pd.DataFrame, target_date: pd.Timestamp, 
-                           thresholds: Dict, metadata: Dict) -> Dict:
-        """
-        Analyze weather prospects for a single target date
-        """
+
+    def _process_historical_data(self, raw_data: List[Dict]) -> List[Dict]:
+        """Process and validate historical weather data"""
         
-        try:
-            # Extract month and day from target date
-            target_month = target_date.month
-            target_day = target_date.day
-            
-            # Find historical data for similar dates (±3 days window)
-            similar_dates = df[
-                (df['month'] == target_month) & 
-                (abs(df['day'] - target_day) <= 3)
-            ].copy()
-            
-            if len(similar_dates) == 0:
-                return None
-            
-            # Calculate weather risks
-            risks = self._calculate_risks(similar_dates, thresholds)
-            
-            # Calculate overall weather score (0-100)
-            weather_score = self._calculate_weather_score(risks, thresholds)
-            
-            # Generate confidence score based on data availability
-            confidence_score = min(100, (len(similar_dates) / 60) * 100)  # 60 = 20 years × 3 days
-            
-            # Determine weather conditions
-            conditions = self._determine_conditions(similar_dates)
-            
-            return {
-                'date': target_date.strftime('%Y-%m-%d'),
-                'day_of_week': target_date.strftime('%A'),
-                'weather_score': round(weather_score, 1),
-                'confidence_score': round(confidence_score, 1),
-                'risks': risks,
-                'conditions': conditions,
-                'historical_data_points': len(similar_dates),
-                'recommendation': self._generate_recommendation(weather_score, risks)
-            }
-            
-        except Exception as e:
-            print(f"Error analyzing date {target_date}: {e}")
-            return None
-    
-    def _calculate_risks(self, similar_dates: pd.DataFrame, thresholds: Dict) -> Dict:
-        """
-        Calculate weather risk probabilities
-        """
+        processed = []
         
-        total_days = len(similar_dates)
+        for record in raw_data:
+            try:
+                # Extract and validate data
+                processed_record = {
+                    'date': self._parse_date(record.get('date')),
+                    'temperature': float(record.get('temperature', 15)),
+                    'precipitation': float(record.get('precipitation', 0)),
+                    'wind_speed': float(record.get('wind_speed', 5)),
+                    'humidity': float(record.get('humidity', 60)),
+                    'pressure': float(record.get('pressure', 1013.25))
+                }
+                
+                # Add derived fields
+                processed_record['month'] = processed_record['date'].month
+                processed_record['day_of_year'] = processed_record['date'].timetuple().tm_yday
+                processed_record['season'] = self._determine_season(processed_record['month'])
+                
+                processed.append(processed_record)
+                
+            except (ValueError, TypeError, AttributeError):
+                continue  # Skip invalid records
         
-        if total_days == 0:
+        return processed
+
+    def _parse_date(self, date_input) -> datetime:
+        """Parse date from various input formats"""
+        
+        if isinstance(date_input, datetime):
+            return date_input
+        elif isinstance(date_input, str):
+            # Try common date formats
+            for fmt in ['%Y-%m-%d', '%Y/%m/%d', '%d-%m-%Y', '%d/%m/%Y']:
+                try:
+                    return datetime.strptime(date_input, fmt)
+                except ValueError:
+                    continue
+        
+        raise ValueError(f"Unable to parse date: {date_input}")
+
+    def _determine_season(self, month: int) -> str:
+        """Determine season from month number"""
+        
+        if month in [12, 1, 2]:
+            return 'winter'
+        elif month in [3, 4, 5]:
+            return 'spring'
+        elif month in [6, 7, 8]:
+            return 'summer'
+        else:  # [9, 10, 11]
+            return 'autumn'
+
+    def _calculate_baseline_statistics(self, processed_data: List[Dict]) -> Dict:
+        """Calculate baseline weather statistics"""
+        
+        if not processed_data:
             return {}
         
-        # Temperature risks
-        very_hot_days = (similar_dates['T2M'] > 35).sum()
-        very_cold_days = (similar_dates['T2M'] < -10).sum()
-        ideal_temp_days = (
-            (similar_dates['T2M'] >= thresholds['ideal_temp_min']) & 
-            (similar_dates['T2M'] <= thresholds['ideal_temp_max'])
-        ).sum()
-        
-        # Precipitation risks
-        very_wet_days = (similar_dates['PRECTOTCORR'] > thresholds['max_rain']).sum()
-        dry_days = (similar_dates['PRECTOTCORR'] <= 1).sum()
-        
-        # Wind risks
-        very_windy_days = (similar_dates['WS2M'] > (thresholds['max_wind'] / 3.6)).sum()  # Convert km/h to m/s
-        
-        return {
-            'very_hot': {
-                'probability': round((very_hot_days / total_days) * 100, 1),
-                'description': f'Temperature above 35°C',
-                'risk_level': self._get_risk_level((very_hot_days / total_days) * 100)
-            },
-            'very_cold': {
-                'probability': round((very_cold_days / total_days) * 100, 1),
-                'description': f'Temperature below -10°C',
-                'risk_level': self._get_risk_level((very_cold_days / total_days) * 100)
-            },
-            'ideal_temperature': {
-                'probability': round((ideal_temp_days / total_days) * 100, 1),
-                'description': f'Temperature {thresholds["ideal_temp_min"]}-{thresholds["ideal_temp_max"]}°C',
-                'risk_level': 'low' if (ideal_temp_days / total_days) > 0.7 else 'medium'
-            },
-            'heavy_rain': {
-                'probability': round((very_wet_days / total_days) * 100, 1),
-                'description': f'Rainfall above {thresholds["max_rain"]}mm/day',
-                'risk_level': self._get_risk_level((very_wet_days / total_days) * 100)
-            },
-            'dry_weather': {
-                'probability': round((dry_days / total_days) * 100, 1),
-                'description': 'Little to no rainfall (≤1mm)',
-                'risk_level': 'low'
-            },
-            'strong_winds': {
-                'probability': round((very_windy_days / total_days) * 100, 1),
-                'description': f'Wind speed above {thresholds["max_wind"]} km/h',
-                'risk_level': self._get_risk_level((very_windy_days / total_days) * 100)
-            }
-        }
-    
-    def _calculate_weather_score(self, risks: Dict, thresholds: Dict) -> float:
-        """
-        Calculate overall weather score (0-100, higher is better)
-        """
-        
-        if not risks:
-            return 0
-        
-        # Start with perfect score
-        score = 100
-        
-        # Penalty for high-risk weather
-        score -= risks['very_hot']['probability'] * 0.8
-        score -= risks['very_cold']['probability'] * 0.8
-        score -= risks['heavy_rain']['probability'] * 0.9
-        score -= risks['strong_winds']['probability'] * 0.6
-        
-        # Bonus for ideal conditions
-        score += (risks['ideal_temperature']['probability'] - 50) * 0.3  # Bonus if >50% ideal temp
-        score += (risks['dry_weather']['probability'] - 50) * 0.2       # Bonus if >50% dry days
-        
-        # Ensure score is between 0 and 100
-        return max(0, min(100, score))
-    
-    def _get_risk_level(self, probability: float) -> str:
-        """
-        Convert probability percentage to risk level
-        """
-        if probability < 20:
-            return 'low'
-        elif probability < 50:
-            return 'medium'
-        else:
-            return 'high'
-    
-    def _determine_conditions(self, similar_dates: pd.DataFrame) -> Dict:
-        """
-        Determine expected weather conditions
-        """
+        # Extract parameter lists
+        temperatures = [r['temperature'] for r in processed_data]
+        precipitations = [r['precipitation'] for r in processed_data]
+        wind_speeds = [r['wind_speed'] for r in processed_data]
+        humidities = [r['humidity'] for r in processed_data]
         
         return {
             'temperature': {
-                'average': round(similar_dates['T2M'].mean(), 1),
-                'range': {
-                    'min': round(similar_dates['T2M'].min(), 1),
-                    'max': round(similar_dates['T2M'].max(), 1)
-                }
+                'mean': statistics.mean(temperatures),
+                'median': statistics.median(temperatures),
+                'std_dev': statistics.stdev(temperatures) if len(temperatures) > 1 else 0,
+                'min': min(temperatures),
+                'max': max(temperatures)
             },
             'precipitation': {
-                'average_daily': round(similar_dates['PRECTOTCORR'].mean(), 1),
-                'max_recorded': round(similar_dates['PRECTOTCORR'].max(), 1)
+                'mean': statistics.mean(precipitations),
+                'median': statistics.median(precipitations),
+                'total_days_with_rain': sum(1 for p in precipitations if p > 1),
+                'heavy_rain_days': sum(1 for p in precipitations if p > 25)
             },
             'wind_speed': {
-                'average': round(similar_dates['WS2M'].mean(), 1),
-                'max': round(similar_dates['WS2M'].max(), 1)
+                'mean': statistics.mean(wind_speeds),
+                'median': statistics.median(wind_speeds),
+                'strong_wind_days': sum(1 for w in wind_speeds if w > 15)
             },
             'humidity': {
-                'average': round(similar_dates['RH2M'].mean(), 1) if 'RH2M' in similar_dates.columns else None
+                'mean': statistics.mean(humidities),
+                'median': statistics.median(humidities),
+                'very_humid_days': sum(1 for h in humidities if h > 85)
             }
         }
-    
-    def _generate_recommendation(self, weather_score: float, risks: Dict) -> Dict:
-        """
-        Generate actionable recommendation based on analysis
-        """
+
+    def _analyze_seasonal_patterns(self, processed_data: List[Dict]) -> Dict:
+        """Analyze seasonal weather patterns"""
         
-        if weather_score >= 85:
-            recommendation_text = "Excellent weather conditions expected! 🌟"
-            recommendation_level = "excellent"
-        elif weather_score >= 70:
-            recommendation_text = "Very good weather conditions. Great choice! ✅"
-            recommendation_level = "very_good"
-        elif weather_score >= 55:
-            recommendation_text = "Good weather overall, with minor risks to consider. 👍"
-            recommendation_level = "good"
-        elif weather_score >= 40:
-            recommendation_text = "Fair weather with some concerns. Consider alternatives. ⚠️"
-            recommendation_level = "fair"
-        else:
-            recommendation_text = "High weather risks detected. Strong recommendation to choose alternative dates. ⛈️"
-            recommendation_level = "poor"
+        seasonal_data = {'winter': [], 'spring': [], 'summer': [], 'autumn': []}
         
-        # Generate specific advice
-        advice = []
-        if risks.get('heavy_rain', {}).get('probability', 0) > 30:
-            advice.append("High rain probability - consider indoor backup plan")
-        if risks.get('very_hot', {}).get('probability', 0) > 25:
-            advice.append("Risk of very hot weather - plan for shade and hydration")
-        if risks.get('strong_winds', {}).get('probability', 0) > 20:
-            advice.append("Potential for strong winds - secure outdoor decorations")
+        # Group data by season
+        for record in processed_data:
+            seasonal_data[record['season']].append(record)
+        
+        seasonal_analysis = {}
+        
+        for season, records in seasonal_data.items():
+            if records:
+                temps = [r['temperature'] for r in records]
+                precips = [r['precipitation'] for r in records]
+                
+                seasonal_analysis[season] = {
+                    'avg_temperature': statistics.mean(temps),
+                    'temp_range': max(temps) - min(temps),
+                    'avg_precipitation': statistics.mean(precips),
+                    'rainy_days_percent': (sum(1 for p in precips if p > 1) / len(precips)) * 100,
+                    'record_count': len(records)
+                }
+        
+        return seasonal_analysis
+
+    def _predict_weather_for_date(self, target_date: datetime, processed_data: List[Dict],
+                                baseline_stats: Dict, seasonal_patterns: Dict, 
+                                activity_type: str) -> Dict:
+        """Predict weather conditions for a specific target date"""
+        
+        # Find similar historical dates (same month, ±15 days)
+        similar_dates = self._find_similar_dates(target_date, processed_data)
+        
+        if not similar_dates:
+            return self._generate_fallback_prediction(target_date, activity_type)
+        
+        # Calculate predictions from similar dates
+        predicted_conditions = self._calculate_predicted_conditions(similar_dates)
+        
+        # Assess risks based on historical patterns
+        risk_assessment = self._assess_weather_risks(predicted_conditions, similar_dates)
+        
+        # Calculate suitability for the activity
+        suitability_score = self._calculate_activity_suitability(
+            predicted_conditions, activity_type
+        )
+        
+        # Calculate confidence based on data quality
+        confidence_score = self._calculate_confidence_score(similar_dates, baseline_stats)
         
         return {
-            'text': recommendation_text,
-            'level': recommendation_level,
-            'advice': advice
+            'date': target_date.strftime('%Y-%m-%d'),
+            'day_of_week': target_date.strftime('%A'),
+            'predicted_conditions': predicted_conditions,
+            'risk_assessment': risk_assessment,
+            'suitability_score': round(suitability_score, 1),
+            'confidence_score': round(confidence_score, 1),
+            'activity_type': activity_type,
+            'recommendation': self._generate_recommendation(
+                suitability_score, risk_assessment
+            ),
+            'similar_dates_analyzed': len(similar_dates),
+            'season': self._determine_season(target_date.month)
         }
-    
-    def _generate_insights(self, weather_windows: List[Dict], df: pd.DataFrame, thresholds: Dict) -> Dict:
-        """
-        Generate overall insights about the analysis period
-        """
+
+    def _find_similar_dates(self, target_date: datetime, 
+                           processed_data: List[Dict]) -> List[Dict]:
+        """Find historically similar dates"""
         
-        if not weather_windows:
+        target_month = target_date.month
+        target_day = target_date.day
+        
+        similar_dates = []
+        
+        for record in processed_data:
+            # Same month check
+            if record['month'] == target_month:
+                # Within ±15 days check
+                day_difference = abs(record['date'].day - target_day)
+                if day_difference <= 15:
+                    similar_dates.append(record)
+        
+        return similar_dates
+
+    def _calculate_predicted_conditions(self, similar_dates: List[Dict]) -> Dict:
+        """Calculate predicted conditions from similar historical dates"""
+        
+        temperatures = [r['temperature'] for r in similar_dates]
+        precipitations = [r['precipitation'] for r in similar_dates]
+        wind_speeds = [r['wind_speed'] for r in similar_dates]
+        humidities = [r['humidity'] for r in similar_dates]
+        
+        return {
+            'temperature': round(statistics.mean(temperatures), 1),
+            'temperature_range': {
+                'min': round(min(temperatures), 1),
+                'max': round(max(temperatures), 1)
+            },
+            'precipitation': round(statistics.mean(precipitations), 1),
+            'wind_speed': round(statistics.mean(wind_speeds), 1),
+            'humidity': round(statistics.mean(humidities), 1)
+        }
+
+    def _assess_weather_risks(self, conditions: Dict, similar_dates: List[Dict]) -> Dict:
+        """Assess weather-related risks"""
+        
+        temp = conditions['temperature']
+        precip = conditions['precipitation']
+        wind = conditions['wind_speed']
+        
+        # Calculate risk probabilities based on historical data
+        total_records = len(similar_dates)
+        
+        very_hot_count = sum(1 for r in similar_dates if r['temperature'] > 35)
+        very_cold_count = sum(1 for r in similar_dates if r['temperature'] < -15)
+        heavy_rain_count = sum(1 for r in similar_dates if r['precipitation'] > 25)
+        strong_wind_count = sum(1 for r in similar_dates if r['wind_speed'] > 15)
+        
+        return {
+            'very_hot': {
+                'probability': round((very_hot_count / total_records) * 100, 1),
+                'description': 'Temperature above 35°C'
+            },
+            'very_cold': {
+                'probability': round((very_cold_count / total_records) * 100, 1),
+                'description': 'Temperature below -15°C'
+            },
+            'heavy_rain': {
+                'probability': round((heavy_rain_count / total_records) * 100, 1),
+                'description': 'Precipitation above 25mm/day'
+            },
+            'strong_winds': {
+                'probability': round((strong_wind_count / total_records) * 100, 1),
+                'description': 'Wind speed above 15 m/s (54 km/h)'
+            },
+            'overall_risk_level': self._categorize_risk_level(
+                very_hot_count + very_cold_count + heavy_rain_count + strong_wind_count,
+                total_records
+            )
+        }
+
+    def _calculate_activity_suitability(self, conditions: Dict, activity_type: str) -> float:
+        """Calculate how suitable conditions are for the specified activity"""
+        
+        comfort_range = self.comfort_ranges.get(activity_type, self.comfort_ranges['general'])
+        
+        temp = conditions['temperature']
+        precip = conditions['precipitation']
+        wind = conditions['wind_speed']
+        
+        # Temperature suitability
+        if comfort_range['temp_min'] <= temp <= comfort_range['temp_max']:
+            temp_score = 100
+        else:
+            temp_deviation = min(
+                abs(temp - comfort_range['temp_min']), 
+                abs(temp - comfort_range['temp_max'])
+            )
+            temp_score = max(0, 100 - (temp_deviation * 5))
+        
+        # Precipitation suitability
+        if precip <= comfort_range['max_rain']:
+            precip_score = 100
+        else:
+            precip_score = max(0, 100 - ((precip - comfort_range['max_rain']) * 10))
+        
+        # Wind suitability
+        wind_kmh = wind * 3.6  # Convert m/s to km/h
+        if wind_kmh <= comfort_range['max_wind']:
+            wind_score = 100
+        else:
+            wind_score = max(0, 100 - ((wind_kmh - comfort_range['max_wind']) * 2))
+        
+        # Weighted average (precipitation weighted highest for outdoor activities)
+        suitability = (0.3 * temp_score + 0.5 * precip_score + 0.2 * wind_score)
+        
+        return suitability
+
+    def _calculate_confidence_score(self, similar_dates: List[Dict], 
+                                  baseline_stats: Dict) -> float:
+        """Calculate confidence score for prediction"""
+        
+        # Base confidence from sample size
+        sample_size = len(similar_dates)
+        sample_confidence = min(100, sample_size * 10)  # 10% per sample, max 100%
+        
+        # Data consistency confidence
+        if sample_size > 1:
+            temps = [r['temperature'] for r in similar_dates]
+            temp_consistency = 100 - (statistics.stdev(temps) * 5)  # Lower std dev = higher confidence
+            temp_consistency = max(0, min(100, temp_consistency))
+        else:
+            temp_consistency = 50
+        
+        # Historical data depth
+        years_of_data = len(set(r['date'].year for r in similar_dates))
+        depth_confidence = min(100, years_of_data * 15)  # 15% per year of data
+        
+        # Weighted average
+        confidence = (0.4 * sample_confidence + 0.4 * temp_consistency + 0.2 * depth_confidence)
+        
+        return confidence
+
+    def _categorize_risk_level(self, risk_events: int, total_records: int) -> str:
+        """Categorize overall risk level"""
+        
+        risk_percentage = (risk_events / total_records) * 100 if total_records > 0 else 0
+        
+        if risk_percentage > 30:
+            return 'high'
+        elif risk_percentage > 15:
+            return 'moderate'
+        elif risk_percentage > 5:
+            return 'low'
+        else:
+            return 'minimal'
+
+    def _generate_recommendation(self, suitability_score: float, 
+                               risk_assessment: Dict) -> str:
+        """Generate human-readable recommendation"""
+        
+        risk_level = risk_assessment['overall_risk_level']
+        
+        if suitability_score >= 80 and risk_level in ['minimal', 'low']:
+            return "Excellent conditions expected - highly recommended!"
+        elif suitability_score >= 60 and risk_level in ['minimal', 'low', 'moderate']:
+            return "Good conditions expected - recommended with minor precautions"
+        elif suitability_score >= 40:
+            return "Moderate conditions - consider backup plans"
+        else:
+            return "Poor conditions expected - strong backup plans recommended"
+
+    def _analyze_activity_suitability(self, predictions: List[Dict], 
+                                    activity_type: str) -> Dict:
+        """Analyze overall activity suitability across all predictions"""
+        
+        suitability_scores = [p.get('suitability_score', 0) for p in predictions]
+        
+        if not suitability_scores:
+            return {'analysis': 'No predictions available'}
+        
+        excellent_days = sum(1 for score in suitability_scores if score >= 80)
+        good_days = sum(1 for score in suitability_scores if 60 <= score < 80)
+        moderate_days = sum(1 for score in suitability_scores if 40 <= score < 60)
+        poor_days = sum(1 for score in suitability_scores if score < 40)
+        
+        return {
+            'activity_type': activity_type,
+            'total_days_analyzed': len(suitability_scores),
+            'excellent_days': excellent_days,
+            'good_days': good_days,
+            'moderate_days': moderate_days,
+            'poor_days': poor_days,
+            'average_suitability': round(statistics.mean(suitability_scores), 1),
+            'best_day': predictions[0]['date'] if predictions else None,
+            'recommendation_summary': self._generate_overall_recommendation(
+                excellent_days, good_days, moderate_days, poor_days
+            )
+        }
+
+    def _generate_overall_recommendation(self, excellent: int, good: int, 
+                                       moderate: int, poor: int) -> str:
+        """Generate overall recommendation summary"""
+        
+        total = excellent + good + moderate + poor
+        
+        if total == 0:
+            return "No analysis available"
+        
+        excellent_pct = (excellent / total) * 100
+        good_pct = (good / total) * 100
+        
+        if excellent_pct >= 50:
+            return "Excellent period for outdoor activities - many great options!"
+        elif (excellent_pct + good_pct) >= 60:
+            return "Good period overall - several suitable days available"
+        elif moderate >= (total * 0.5):
+            return "Mixed conditions - careful date selection recommended"
+        else:
+            return "Challenging period - consider indoor alternatives or flexible scheduling"
+
+    def _get_data_date_range(self, processed_data: List[Dict]) -> Dict:
+        """Get the date range of analyzed data"""
+        
+        if not processed_data:
             return {}
         
-        scores = [w['weather_score'] for w in weather_windows]
-        
-        best_window = weather_windows[0] if weather_windows else None
-        worst_window = min(weather_windows, key=lambda x: x['weather_score']) if weather_windows else None
+        dates = [r['date'] for r in processed_data]
         
         return {
-            'best_date': best_window['date'] if best_window else None,
-            'worst_date': worst_window['date'] if worst_window else None,
-            'average_score': round(statistics.mean(scores), 1),
-            'score_range': {
-                'min': round(min(scores), 1),
-                'max': round(max(scores), 1)
-            },
-            'excellent_days': len([s for s in scores if s >= 85]),
-            'good_days': len([s for s in scores if s >= 70]),
-            'risky_days': len([s for s in scores if s < 40]),
-            'climate_note': "Analysis based on 20-year historical NASA satellite data"
+            'earliest': min(dates).strftime('%Y-%m-%d'),
+            'latest': max(dates).strftime('%Y-%m-%d'),
+            'span_years': (max(dates) - min(dates)).days / 365.25
         }
-    
-    def calculate_weather_risks(self, latitude: float, longitude: float, target_date: str) -> Dict:
-        """
-        Calculate specific weather risks for a single target date
-        (Simplified version for single-date analysis)
-        """
+
+    def _assess_data_completeness(self, processed_data: List[Dict]) -> Dict:
+        """Assess completeness and quality of data"""
+        
+        if not processed_data:
+            return {'completeness': 'no_data'}
+        
+        total_records = len(processed_data)
+        
+        # Check for missing values (assuming 0 or negative values might indicate missing data)
+        temp_valid = sum(1 for r in processed_data if r['temperature'] != 0)
+        precip_valid = sum(1 for r in processed_data if r['precipitation'] >= 0)
+        wind_valid = sum(1 for r in processed_data if r['wind_speed'] >= 0)
         
         return {
-            'date': target_date,
-            'latitude': latitude,
-            'longitude': longitude,
-            'message': 'Single date risk analysis - use weather-windows endpoint for full analysis'
+            'total_records': total_records,
+            'temperature_completeness': (temp_valid / total_records) * 100,
+            'precipitation_completeness': (precip_valid / total_records) * 100,
+            'wind_completeness': (wind_valid / total_records) * 100,
+            'overall_quality': 'high' if total_records > 100 else 'moderate' if total_records > 30 else 'limited'
+        }
+
+    def _generate_fallback_analysis(self, target_dates: List[str], 
+                                  activity_type: str) -> Dict:
+        """Generate fallback analysis when no historical data is available"""
+        
+        fallback_predictions = []
+        
+        for date_str in target_dates:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d')
+            fallback_predictions.append({
+                'date': date_str,
+                'day_of_week': target_date.strftime('%A'),
+                'predicted_conditions': {
+                    'temperature': 20, 'precipitation': 5, 'wind_speed': 8, 'humidity': 60
+                },
+                'suitability_score': 50,
+                'confidence_score': 25,
+                'fallback_reason': 'No historical data available'
+            })
+        
+        return {
+            'success': True,
+            'analysis_method': 'Fallback Analysis',
+            'predictions': fallback_predictions,
+            'warning': 'Results based on default values - limited accuracy'
+        }
+
+    def _generate_fallback_prediction(self, target_date: datetime, 
+                                    activity_type: str) -> Dict:
+        """Generate fallback prediction for single date"""
+        
+        return {
+            'date': target_date.strftime('%Y-%m-%d'),
+            'day_of_week': target_date.strftime('%A'),
+            'predicted_conditions': {
+                'temperature': 20, 'precipitation': 5, 'wind_speed': 8, 'humidity': 60
+            },
+            'suitability_score': 50,
+            'confidence_score': 25,
+            'fallback_used': True
         }

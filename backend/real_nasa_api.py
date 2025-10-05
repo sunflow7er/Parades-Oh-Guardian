@@ -1,4 +1,310 @@
 """
+Real NASA API - Alternative Implementation
+Focused on pure NASA POWER data with minimal processing
+"""
+
+import requests
+import json
+from datetime import datetime, timedelta
+import time
+from typing import Dict, List, Optional
+
+class RealNASAAPI:
+    """
+    Pure NASA POWER API implementation
+    Minimal processing, maximum authenticity
+    """
+    
+    def __init__(self):
+        self.api_url = "https://power.larc.nasa.gov/api/temporal/daily/point"
+        self.timeout = 25
+        
+        # Core NASA POWER parameters only
+        self.core_parameters = [
+            'T2M',          # Temperature at 2 Meters
+            'T2M_MAX',      # Maximum Temperature 
+            'T2M_MIN',      # Minimum Temperature
+            'PRECTOTCORR',  # Precipitation Corrected
+            'WS2M',         # Wind Speed at 2 Meters
+            'RH2M'          # Relative Humidity at 2 Meters
+        ]
+        
+        # Simple activity limits
+        self.activity_limits = {
+            'wedding': {'rain_limit': 2, 'temp_min': 18, 'temp_max': 26},
+            'hiking': {'rain_limit': 8, 'temp_min': 10, 'temp_max': 24},
+            'farming': {'rain_limit': 35, 'temp_min': 5, 'temp_max': 30},
+            'general': {'rain_limit': 10, 'temp_min': 12, 'temp_max': 28}
+        }
+
+    def get_pure_nasa_data(self, latitude: float, longitude: float, 
+                          start_date: str, end_date: str) -> Dict:
+        """
+        Get pure NASA POWER data without interpretation
+        """
+        
+        try:
+            # Build NASA API request
+            params = {
+                'parameters': ','.join(self.core_parameters),
+                'community': 'AG',
+                'longitude': longitude,
+                'latitude': latitude,
+                'start': start_date.replace('-', ''),
+                'end': end_date.replace('-', ''),
+                'format': 'JSON'
+            }
+            
+            print(f"Pure NASA request: {latitude}, {longitude}")
+            
+            # Make NASA API call
+            response = requests.get(self.api_url, params=params, timeout=self.timeout)
+            
+            if response.status_code != 200:
+                raise Exception(f"NASA API returned status {response.status_code}")
+            
+            nasa_data = response.json()
+            
+            # Return raw NASA data with minimal processing
+            return {
+                'success': True,
+                'nasa_raw_data': nasa_data,
+                'processed_data': self._minimal_processing(nasa_data),
+                'api_call_info': {
+                    'url': self.api_url,
+                    'parameters': self.core_parameters,
+                    'coordinates': f'{latitude}, {longitude}',
+                    'date_range': f'{start_date} to {end_date}'
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Pure NASA API call failed: {str(e)}',
+                'nasa_api_status': 'unreachable'
+            }
+
+    def _minimal_processing(self, nasa_raw: Dict) -> List:
+        """
+        Minimal processing of NASA data - just organize by date
+        """
+        
+        try:
+            parameters = nasa_raw['properties']['parameter']
+            daily_records = []
+            
+            # Get all dates from temperature data
+            temp_data = parameters.get('T2M', {})
+            dates = list(temp_data.keys())
+            
+            for date_str in dates:
+                # Convert NASA date format to readable
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y%m%d')
+                    
+                    record = {
+                        'date': date_obj.strftime('%Y-%m-%d'),
+                        'day_name': date_obj.strftime('%A'),
+                        'nasa_data': {
+                            'temperature': parameters.get('T2M', {}).get(date_str),
+                            'temp_max': parameters.get('T2M_MAX', {}).get(date_str),
+                            'temp_min': parameters.get('T2M_MIN', {}).get(date_str),
+                            'precipitation': parameters.get('PRECTOTCORR', {}).get(date_str, 0),
+                            'wind_speed': parameters.get('WS2M', {}).get(date_str, 0),
+                            'humidity': parameters.get('RH2M', {}).get(date_str, 50)
+                        }
+                    }
+                    
+                    # Only include records with valid temperature
+                    if record['nasa_data']['temperature'] is not None:
+                        daily_records.append(record)
+                        
+                except Exception as e:
+                    continue  # Skip invalid dates
+            
+            return daily_records
+            
+        except Exception as e:
+            print(f"Minimal processing error: {e}")
+            return []
+
+    def analyze_with_pure_nasa(self, latitude: float, longitude: float,
+                              start_date: str, end_date: str, 
+                              activity_type: str = 'general') -> Dict:
+        """
+        Analyze weather using pure NASA data
+        """
+        
+        analysis_start = time.time()
+        
+        try:
+            # Get pure NASA data
+            nasa_result = self.get_pure_nasa_data(latitude, longitude, start_date, end_date)
+            
+            if not nasa_result['success']:
+                return nasa_result
+            
+            daily_data = nasa_result['processed_data']
+            
+            if not daily_data:
+                return {
+                    'success': False,
+                    'error': 'No valid NASA data received'
+                }
+            
+            # Simple analysis based on pure NASA measurements
+            analyzed_days = []
+            
+            for day in daily_data:
+                analysis = self._analyze_pure_day(day, activity_type)
+                analyzed_days.append(analysis)
+            
+            # Sort by simple score
+            analyzed_days.sort(key=lambda x: x.get('simple_score', 0), reverse=True)
+            
+            analysis_time = time.time() - analysis_start
+            
+            return {
+                'success': True,
+                'analysis_method': 'Pure NASA POWER data',
+                'processing_time': f'{analysis_time:.2f}s',
+                'activity_type': activity_type,
+                'daily_analysis': analyzed_days,
+                'top_recommendations': analyzed_days[:3],
+                'nasa_data_integrity': {
+                    'source': 'NASA POWER API direct',
+                    'parameters': self.core_parameters,
+                    'records_processed': len(daily_data),
+                    'data_authenticity': '100% NASA satellite measurements'
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Pure NASA analysis failed: {str(e)}'
+            }
+
+    def _analyze_pure_day(self, day_data: Dict, activity_type: str) -> Dict:
+        """
+        Simple analysis of single day using pure NASA data
+        """
+        
+        nasa_data = day_data['nasa_data']
+        limits = self.activity_limits[activity_type]
+        
+        # Extract NASA measurements
+        temp = nasa_data.get('temperature', 15)
+        precip = nasa_data.get('precipitation', 0)
+        wind = nasa_data.get('wind_speed', 5)
+        humidity = nasa_data.get('humidity', 60)
+        
+        # Simple scoring based on NASA data
+        score = 100
+        
+        # Temperature scoring
+        if temp < limits['temp_min'] or temp > limits['temp_max']:
+            score -= 25
+        elif temp < limits['temp_min'] - 5 or temp > limits['temp_max'] + 5:
+            score -= 50
+        
+        # Precipitation scoring
+        if precip > limits['rain_limit']:
+            score -= min(60, precip * 3)
+        
+        # Wind scoring (convert m/s to km/h)
+        wind_kmh = wind * 3.6
+        if wind_kmh > 30:
+            score -= min(30, wind_kmh - 20)
+        
+        # Humidity penalty for extremes
+        if humidity > 80:
+            score -= (humidity - 80) / 2
+        
+        score = max(0, score)
+        
+        return {
+            'date': day_data['date'],
+            'day_of_week': day_data['day_name'],
+            'simple_score': round(score, 1),
+            'nasa_measurements': {
+                'temperature_c': round(temp, 1),
+                'precipitation_mm': round(precip, 1),
+                'wind_speed_ms': round(wind, 1),
+                'wind_speed_kmh': round(wind * 3.6, 1),
+                'humidity_percent': round(humidity, 1)
+            },
+            'simple_assessment': self._get_simple_assessment(score),
+            'activity_suitability': self._assess_activity_suitability(nasa_data, activity_type),
+            'data_source': 'NASA POWER API direct measurements'
+        }
+
+    def _get_simple_assessment(self, score: float) -> str:
+        """
+        Simple weather assessment based on score
+        """
+        if score >= 85:
+            return "Excellent conditions based on NASA data"
+        elif score >= 70:
+            return "Good conditions according to NASA measurements"
+        elif score >= 50:
+            return "Moderate conditions from NASA observations"
+        elif score >= 30:
+            return "Poor conditions indicated by NASA data"
+        else:
+            return "Very poor conditions per NASA satellite measurements"
+
+    def _assess_activity_suitability(self, nasa_data: Dict, activity_type: str) -> Dict:
+        """
+        Assess activity suitability using NASA data
+        """
+        
+        temp = nasa_data.get('temperature', 15)
+        precip = nasa_data.get('precipitation', 0)
+        wind = nasa_data.get('wind_speed', 5)
+        
+        limits = self.activity_limits[activity_type]
+        
+        suitability = {
+            'temperature_ok': limits['temp_min'] <= temp <= limits['temp_max'],
+            'precipitation_ok': precip <= limits['rain_limit'],
+            'wind_acceptable': wind * 3.6 <= 35,  # 35 km/h general limit
+            'overall_suitable': True
+        }
+        
+        # Overall assessment
+        suitability['overall_suitable'] = all([
+            suitability['temperature_ok'],
+            suitability['precipitation_ok'],
+            suitability['wind_acceptable']
+        ])
+        
+        return suitability
+
+    def test_nasa_connection(self) -> Dict:
+        """
+        Test NASA POWER API connection
+        """
+        try:
+            # Simple test request
+            test_result = self.get_pure_nasa_data(
+                43.2567, 76.9286, '2024-07-01', '2024-07-01'
+            )
+            
+            return {
+                'nasa_connection': 'successful' if test_result['success'] else 'failed',
+                'test_location': 'Almaty, Kazakhstan',
+                'api_response': test_result['success'],
+                'error': test_result.get('error', 'None')
+            }
+            
+        except Exception as e:
+            return {
+                'nasa_connection': 'error',
+                'error': str(e)
+            }
+"""
 REAL NASA POWER API Integration - Accurate Weather Data
 Using actual NASA satellite data for precise meteorological analysis
 """
@@ -42,10 +348,6 @@ class NASAWeatherAPI:
                 'max_rain': 50, 'ideal_temp_min': 5, 'ideal_temp_max': 35,
                 'max_wind': 60, 'max_humidity': 90
             },
-            'outdoor': {
-                'max_rain': 12, 'ideal_temp_min': 12, 'ideal_temp_max': 28,
-                'max_wind': 30, 'max_humidity': 75
-            },
             'general': {
                 'max_rain': 15, 'ideal_temp_min': 15, 'ideal_temp_max': 30,
                 'max_wind': 35, 'max_humidity': 75
@@ -64,7 +366,7 @@ class NASAWeatherAPI:
         analysis_start = time.time()
         
         try:
-            print(f"Fetching NASA satellite data for {latitude}, {longitude}")
+            print(f"🛰️ Fetching REAL NASA satellite data for {latitude}, {longitude}")
             
             # Parse target dates
             start_dt = datetime.strptime(start_date, '%Y-%m-%d')
@@ -78,14 +380,9 @@ class NASAWeatherAPI:
             
             # Analyze each target date using real data patterns
             weather_windows = []
-            total_days = (end_dt - start_dt).days + 1
             
             current_date = start_dt
-            day_count = 0
             while current_date <= end_dt:
-                day_count += 1
-                print(f"Analyzing day {day_count}/{total_days}: {current_date.strftime('%Y-%m-%d')}")
-                
                 day_analysis = self._analyze_with_real_data(
                     current_date, current_data, historical_data, 
                     latitude, longitude, activity_type
@@ -124,7 +421,7 @@ class NASAWeatherAPI:
             }
             
         except Exception as e:
-            print(f"NASA API Error: {str(e)}")
+            print(f"❌ NASA API Error: {str(e)}")
             # Fallback to basic analysis if NASA API fails
             return self._fallback_analysis(latitude, longitude, start_date, end_date, activity_type)
 
@@ -153,21 +450,20 @@ class NASAWeatherAPI:
         }
         
         try:
-            print(f"Fetching recent conditions from NASA POWER...")
+            print(f"📡 Fetching recent conditions from NASA POWER...")
             response = requests.get(self.base_url, params=params, timeout=15)
             response.raise_for_status()
             
             data = response.json()
-            processed_records = self._process_nasa_response(data)
+            processed_data = self._process_nasa_response(data)
             
-            result = {'historical_records': processed_records}
-            self.cache[cache_key] = result
-            print(f"Retrieved {len(processed_records)} days of recent NASA data")
+            self.cache[cache_key] = processed_data
+            print(f"✅ Retrieved {len(processed_data)} days of recent NASA data")
             
-            return result
+            return processed_data
             
         except Exception as e:
-            print(f"Warning: Recent data fetch failed: {e}")
+            print(f"⚠️ Recent data fetch failed: {e}")
             return {}
 
     def _fetch_historical_patterns(self, latitude: float, longitude: float, 
@@ -179,8 +475,8 @@ class NASAWeatherAPI:
         current_year = datetime.now().year
         all_historical_data = []
         
-        # Get data for same date range in previous years (reduced to 5 years for speed)
-        for year_offset in range(1, 6):  # Last 5 years
+        # Get data for same date range in previous years
+        for year_offset in range(1, 11):  # Last 10 years
             hist_year = current_year - year_offset
             
             # Adjust dates to historical year
@@ -195,18 +491,14 @@ class NASAWeatherAPI:
             
             if cache_key in self.cache:
                 year_data = self.cache[cache_key]
-                print(f"   Using cached data for {hist_year}")
             else:
-                print(f"   Fetching NASA data for {hist_year}... ({year_offset}/5)")
                 year_data = self._fetch_nasa_year_data(latitude, longitude, hist_start, hist_end)
                 self.cache[cache_key] = year_data
-                # Add delay to avoid overwhelming NASA API
-                time.sleep(1)
             
             if year_data:
                 all_historical_data.extend(year_data)
         
-        print(f"Retrieved {len(all_historical_data)} historical data points")
+        print(f"📊 Retrieved {len(all_historical_data)} historical data points")
         return {'historical_records': all_historical_data}
 
     def _fetch_nasa_year_data(self, latitude: float, longitude: float, 
@@ -233,7 +525,7 @@ class NASAWeatherAPI:
             return self._process_nasa_response(data)
             
         except Exception as e:
-            print(f"Warning: Historical data fetch failed for {start_date.year}: {e}")
+            print(f"⚠️ Historical data fetch failed for {start_date.year}: {e}")
             return []
 
     def _process_nasa_response(self, raw_data: Dict) -> List:
@@ -255,15 +547,15 @@ class NASAWeatherAPI:
                 try:
                     record = {
                         'date': datetime.strptime(date_str, '%Y%m%d'),
-                        'temperature': parameters.get('T2M', {}).get(date_str) if isinstance(parameters.get('T2M'), dict) else None,
-                        'temp_max': parameters.get('T2M_MAX', {}).get(date_str) if isinstance(parameters.get('T2M_MAX'), dict) else None,
-                        'temp_min': parameters.get('T2M_MIN', {}).get(date_str) if isinstance(parameters.get('T2M_MIN'), dict) else None,
-                        'precipitation': parameters.get('PRECTOTCORR', {}).get(date_str, 0) if isinstance(parameters.get('PRECTOTCORR'), dict) else 0,
-                        'wind_speed': parameters.get('WS2M', {}).get(date_str, 0) if isinstance(parameters.get('WS2M'), dict) else 0,
-                        'wind_max': parameters.get('WS2M_MAX', {}).get(date_str, 0) if isinstance(parameters.get('WS2M_MAX'), dict) else 0,
-                        'humidity': parameters.get('RH2M', {}).get(date_str, 50) if isinstance(parameters.get('RH2M'), dict) else 50,
-                        'pressure': parameters.get('PS', {}).get(date_str) if isinstance(parameters.get('PS'), dict) else None,
-                        'specific_humidity': parameters.get('QV2M', {}).get(date_str) if isinstance(parameters.get('QV2M'), dict) else None
+                        'temperature': parameters.get('T2M', {}).get(date_str),
+                        'temp_max': parameters.get('T2M_MAX', {}).get(date_str),
+                        'temp_min': parameters.get('T2M_MIN', {}).get(date_str),
+                        'precipitation': parameters.get('PRECTOTCORR', {}).get(date_str, 0),
+                        'wind_speed': parameters.get('WS2M', {}).get(date_str, 0),
+                        'wind_max': parameters.get('WS2M_MAX', {}).get(date_str, 0),
+                        'humidity': parameters.get('RH2M', {}).get(date_str, 50),
+                        'pressure': parameters.get('PS', {}).get(date_str),
+                        'specific_humidity': parameters.get('QV2M', {}).get(date_str)
                     }
                     
                     # Only include records with valid temperature data
@@ -276,7 +568,7 @@ class NASAWeatherAPI:
             return processed_records
             
         except Exception as e:
-            print(f"NASA data processing error: {e}")
+            print(f"❌ NASA data processing error: {e}")
             return []
 
     def _analyze_with_real_data(self, target_date: datetime, current_data: Dict, 
@@ -316,7 +608,7 @@ class NASAWeatherAPI:
         avg_humidity = sum(humidities) / len(humidities) if humidities else 60
         
         # Calculate risks based on real data
-        thresholds = self.activity_thresholds.get(activity_type, self.activity_thresholds['general'])
+        thresholds = self.activity_thresholds[activity_type]
         
         rain_risk = min(100, (avg_precip / thresholds['max_rain']) * 100)
         temp_risk = 0

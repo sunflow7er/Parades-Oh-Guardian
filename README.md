@@ -7,8 +7,9 @@
 
 Overview
 
-
-
+!!!
+video of the website interface and functionality:
+https://github.com/user-attachments/assets/9385d315-a4c9-4c3b-a900-35547e64753f
 
 
 Parade's oh guardian is an intelligent weather prediction web application that uses 20+ years of NASA satellite data to help event planners find the perfect weather windows for outdoor activities. Unlike traditional weather apps that only show forecasts for the next 7-10 days, Parade's oh guardian analyzes historical patterns to predict weather risks for any future date.
